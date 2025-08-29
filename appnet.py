@@ -775,311 +775,305 @@ class BigBasketAutomation:
         except Exception as e:
             self._log_message(f"ERROR removing duplicates: {str(e)}", log_container)
 
+
+def create_streamlit_ui():
+    """Create the Streamlit user interface"""
+    st.title("🛒 BigBasket Automation")
+    st.markdown("### Automated Gmail Attachment Processing & Excel GRN Consolidation")
     
-    def create_streamlit_ui():
-        """Create the Streamlit user interface"""
-        st.title("🛒 BigBasket Automation")
-        st.markdown("### Automated Gmail Attachment Processing & Excel GRN Consolidation")
+    # Initialize automation object
+    if 'automation' not in st.session_state:
+        st.session_state.automation = BigBasketAutomation()
+    
+    # Initialize logs
+    if 'logs' not in st.session_state:
+        st.session_state.logs = []
+    
+    # Initialize log counter for unique keys
+    if 'log_counter' not in st.session_state:
+        st.session_state.log_counter = 0
+    
+    # Sidebar for navigation and authentication
+    st.sidebar.title("Navigation")
+    workflow_choice = st.sidebar.selectbox(
+        "Select Workflow",
+        ["Gmail to Drive", "Drive to Sheets", "Combined Workflow"]
+    )
+    
+    # Authentication section
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🔐 Authentication")
+    
+    if st.sidebar.button("Authenticate Google APIs", key="auth_button"):
+        with st.spinner("Authenticating..."):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Create a placeholder for logs during authentication
+            log_placeholder = st.empty()
+            
+            success = st.session_state.automation.authenticate_from_secrets(
+                progress_bar, status_text
+            )
+            
+            if success:
+                st.sidebar.success("✅ Authentication successful!")
+                st.session_state.authenticated = True
+            else:
+                st.sidebar.error("❌ Authentication failed")
+                st.session_state.authenticated = False
+    
+    # Check authentication
+    if not st.session_state.get('authenticated', False):
+        st.warning("⚠️ Please authenticate with Google APIs first using the sidebar")
+        st.stop()
+    
+    st.sidebar.success("✅ Authenticated")
+    
+    # Create tabs
+    tab1, tab2 = st.tabs(["📊 Configuration & Execution", "📋 Activity Logs"])
+    
+    with tab1:
+        # Configuration section
+        st.markdown("### ⚙️ Configuration")
         
-        # Initialize automation object
-        if 'automation' not in st.session_state:
-            st.session_state.automation = BigBasketAutomation()
+        # User configurable parameters
+        config_col1, config_col2 = st.columns(2)
         
-        # Initialize logs
-        if 'logs' not in st.session_state:
-            st.session_state.logs = []
+        with config_col1:
+            days_back = st.number_input(
+                "Days Back to Search",
+                min_value=1,
+                max_value=365,
+                value=2,
+                help="How many days back to search emails"
+            )
         
-        # Initialize log counter for unique keys
-        if 'log_counter' not in st.session_state:
-            st.session_state.log_counter = 0
+        with config_col2:
+            max_results = st.number_input(
+                "Maximum Results",
+                min_value=1,
+                max_value=1000,
+                value=1000,
+                help="Maximum number of emails to process"
+            )
         
-        # Sidebar for navigation and authentication
-        st.sidebar.title("Navigation")
-        workflow_choice = st.sidebar.selectbox(
-            "Select Workflow",
-            ["Gmail to Drive", "Drive to Sheets", "Combined Workflow"]
+        # Header row configuration
+        header_row = st.selectbox(
+            "Header Row Position",
+            options=[0, 1, 2, -1],
+            format_func=lambda x: "First row (0)" if x == 0 else "Second row (1)" if x == 1 else "Third row (2)" if x == 2 else "No headers (-1)",
+            help="Row number where headers are located (-1 means no headers)"
         )
         
-        # Authentication section
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### 🔐 Authentication")
+        # Show hardcoded configurations
+        with st.expander("📋 Hardcoded Configuration (View Only)", expanded=False):
+            st.markdown("**Gmail Configuration:**")
+            st.code("""
+Sender: bbnet2@bigbasket.com
+Search Term: grn
+Gmail Drive Folder: 1l5L9IdQ8WcV6AZ04JCeuyxvbNkLPJnHt
+            """)
+            
+            st.markdown("**Excel Configuration:**")
+            st.code("""
+Excel Source Folder: 1mMg7tDkgQTQ3oxG9xJoa4gQ-DzT9R-pn
+Target Spreadsheet: 170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM
+Sheet Name: bbalertgrn_2
+Duplicate Removal: Based on Item Code + po_number
+            """)
         
-        if st.sidebar.button("Authenticate Google APIs", key="auth_button"):
-            with st.spinner("Authenticating..."):
+        # Hardcoded configurations
+        gmail_config = {
+            'sender': 'bbnet2@bigbasket.com',
+            'search_term': 'grn',
+            'days_back': days_back,
+            'max_results': max_results,
+            'gdrive_folder_id': '1l5L9IdQ8WcV6AZ04JCeuyxvbNkLPJnHt'
+        }
+        
+        excel_config = {
+            'excel_folder_id': '1mMg7tDkgQTQ3oxG9xJoa4gQ-DzT9R-pn',
+            'spreadsheet_id': '170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM',
+            'sheet_name': 'bbalertgrn_2',
+            'header_row': header_row
+        }
+        
+        # Workflow execution
+        st.markdown("---")
+        st.markdown("### 🚀 Execute Workflow")
+        
+        # Create a placeholder for the log container that will be used in tab2
+        if 'log_container' not in st.session_state:
+            st.session_state.log_container = None
+        
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            if st.button("📧 Run Gmail to Drive", type="primary", use_container_width=True):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                # Create a placeholder for logs during authentication
-                log_placeholder = st.empty()
-                
-                success = st.session_state.automation.authenticate_from_secrets(
-                    progress_bar, status_text
+                result = st.session_state.automation.process_gmail_workflow(
+                    gmail_config, progress_bar, status_text, None  # Pass None for log_container
                 )
                 
-                if success:
-                    st.sidebar.success("✅ Authentication successful!")
-                    st.session_state.authenticated = True
+                if result['success']:
+                    st.success(f"✅ Gmail workflow completed! Processed {result['processed']} attachments")
                 else:
-                    st.sidebar.error("❌ Authentication failed")
-                    st.session_state.authenticated = False
+                    st.error("❌ Gmail workflow failed")
         
-        # Check authentication
-        if not st.session_state.get('authenticated', False):
-            st.warning("⚠️ Please authenticate with Google APIs first using the sidebar")
-            st.stop()
-        
-        st.sidebar.success("✅ Authenticated")
-        
-        # Create tabs
-        tab1, tab2 = st.tabs(["📊 Configuration & Execution", "📝 Activity Logs"])
-        
-        with tab1:
-            # Configuration section
-            st.markdown("### ⚙️ Configuration")
-            
-            # User configurable parameters
-            config_col1, config_col2 = st.columns(2)
-            
-            with config_col1:
-                days_back = st.number_input(
-                    "Days Back to Search",
-                    min_value=1,
-                    max_value=365,
-                    value=2,
-                    help="How many days back to search emails"
+        with col2:
+            if st.button("📊 Run Drive to Sheets", type="primary", use_container_width=True):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                result = st.session_state.automation.process_excel_workflow(
+                    excel_config, progress_bar, status_text, None  # Pass None for log_container
                 )
-            
-            with config_col2:
-                max_results = st.number_input(
-                    "Maximum Results",
-                    min_value=1,
-                    max_value=1000,
-                    value=1000,
-                    help="Maximum number of emails to process"
+                
+                if result['success']:
+                    st.success(f"✅ Excel workflow completed! Processed {result['processed']} files")
+                else:
+                    st.error("❌ Excel workflow failed")
+        
+        with col3:
+            if st.button("🔄 Run Combined Workflow", type="secondary", use_container_width=True):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                # Run Gmail workflow
+                gmail_result = st.session_state.automation.process_gmail_workflow(
+                    gmail_config, progress_bar, status_text, None
                 )
+                
+                if gmail_result['success']:
+                    progress_bar.progress(50)
+                    # Run Excel workflow
+                    excel_result = st.session_state.automation.process_excel_workflow(
+                        excel_config, progress_bar, status_text, None
+                    )
+                    
+                    progress_bar.progress(100)
+                    
+                    if excel_result['success']:
+                        st.success(f"✅ Combined workflow completed! Processed {gmail_result['processed']} attachments and {excel_result['processed']} files")
+                    else:
+                        st.error("❌ Combined workflow failed in Excel processing")
+                else:
+                    st.error("❌ Combined workflow failed in Gmail processing")
+        
+        # Instructions section
+        st.markdown("---")
+        with st.expander("📖 Instructions", expanded=False):
+            st.markdown("""
+            ### How to Use This App
             
-            # Header row configuration
-            header_row = st.selectbox(
-                "Header Row Position",
-                options=[0, 1, 2, -1],
-                format_func=lambda x: "First row (0)" if x == 0 else "Second row (1)" if x == 1 else "Third row (2)" if x == 2 else "No headers (-1)",
-                help="Row number where headers are located (-1 means no headers)"
+            1. **Authentication**: Click the "Authenticate Google APIs" button in the sidebar
+            2. **Configuration**: Adjust search parameters as needed
+            3. **Execution**: Choose a workflow to run:
+               - **Gmail to Drive**: Downloads Excel attachments from Gmail to Google Drive
+               - **Drive to Sheets**: Processes Excel files from Drive and appends to Google Sheets
+               - **Combined Workflow**: Runs both workflows sequentially
+            4. **Monitor Progress**: Check the "Activity Logs" tab for detailed progress information
+            
+            ### Workflow Details
+            
+            **Gmail to Drive Workflow:**
+            - Searches emails from bbnet2@bigbasket.com containing "grn"
+            - Downloads Excel attachments to a designated Google Drive folder
+            - Organizes files by sender email address
+            
+            **Drive to Sheets Workflow:**
+            - Processes Excel files from the source Drive folder
+            - Extracts data using robust parsing methods
+            - Appends data to the target Google Sheet
+            - Removes duplicates based on Item Code and po_number
+            
+            ### Troubleshooting
+            
+            - If authentication fails, try refreshing the page
+            - For file parsing issues, check the logs for specific errors
+            - Ensure the target Google Sheet has write permissions
+            """)
+    
+    with tab2:
+        st.markdown("### 📋 Activity Logs")
+        
+        # Log controls
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            if st.button("🗑️ Clear Logs", use_container_width=True):
+                st.session_state.logs = []
+                st.rerun()
+        
+        with col2:
+            auto_refresh = st.checkbox("Auto Refresh", value=False)
+        
+        with col3:
+            log_level = st.selectbox(
+                "Filter by Level",
+                ["All", "ERROR", "SUCCESS", "INFO"],
+                index=0
+            )
+        
+        # Display logs
+        st.markdown("---")
+        
+        if auto_refresh:
+            # Auto-refresh every 2 seconds when enabled
+            time.sleep(2)
+            st.rerun()
+        
+        # Filter logs based on selection
+        filtered_logs = st.session_state.logs
+        if log_level != "All":
+            filtered_logs = [log for log in st.session_state.logs if log_level in log]
+        
+        if filtered_logs:
+            # Display logs in a scrollable text area
+            logs_text = '\n'.join(filtered_logs)
+            st.text_area(
+                "Detailed Activity Log",
+                value=logs_text,
+                height=500,
+                key="main_log_display",
+                help="All workflow activities are logged here with timestamps"
             )
             
-            # Show hardcoded configurations
-            with st.expander("📋 Hardcoded Configuration (View Only)", expanded=False):
-                st.markdown("**Gmail Configuration:**")
-                st.code("""
-    Sender: bbnet2@bigbasket.com
-    Search Term: grn
-    Gmail Drive Folder: 1l5L9IdQ8WcV6AZ04JCeuyxvbNkLPJnHt
-                """)
-                
-                st.markdown("**Excel Configuration:**")
-                st.code("""
-    Excel Source Folder: 1mMg7tDkgQTQ3oxG9xJoa4gQ-DzT9R-pn
-    Target Spreadsheet: 170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM
-    Sheet Name: bbalertgrn_2
-    Duplicate Removal: Based on Item Code + po_number
-                """)
+            # Show log statistics
+            st.markdown("#### 📈 Log Statistics")
             
-            # Hardcoded configurations
-            gmail_config = {
-                'sender': 'bbnet2@bigbasket.com',
-                'search_term': 'grn',
-                'days_back': days_back,
-                'max_results': max_results,
-                'gdrive_folder_id': '1l5L9IdQ8WcV6AZ04JCeuyxvbNkLPJnHt'
-            }
-            
-            excel_config = {
-                'excel_folder_id': '1mMg7tDkgQTQ3oxG9xJoa4gQ-DzT9R-pn',
-                'spreadsheet_id': '170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM',
-                'sheet_name': 'bbalertgrn_2',
-                'header_row': header_row
-            }
-            
-            # Workflow execution
-            st.markdown("---")
-            st.markdown("### 🚀 Execute Workflow")
-            
-            # Create a placeholder for the log container that will be used in tab2
-            if 'log_container' not in st.session_state:
-                st.session_state.log_container = None
-            
-            col1, col2, col3 = st.columns([1, 1, 2])
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                if st.button("📧 Run Gmail to Drive", type="primary", use_container_width=True):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    result = st.session_state.automation.process_gmail_workflow(
-                        gmail_config, progress_bar, status_text, None  # Pass None for log_container
-                    )
-                    
-                    if result['success']:
-                        st.success(f"✅ Gmail workflow completed! Processed {result['processed']} attachments")
-                    else:
-                        st.error("❌ Gmail workflow failed")
+                total_logs = len(st.session_state.logs)
+                st.metric("Total Entries", total_logs)
             
             with col2:
-                if st.button("📊 Run Drive to Sheets", type="primary", use_container_width=True):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    result = st.session_state.automation.process_excel_workflow(
-                        excel_config, progress_bar, status_text, None  # Pass None for log_container
-                    )
-                    
-                    if result['success']:
-                        st.success(f"✅ Excel workflow completed! Processed {result['processed']} files")
-                    else:
-                        st.error("❌ Excel workflow failed")
+                error_count = len([log for log in st.session_state.logs if "ERROR" in log])
+                st.metric("Errors", error_count)
             
             with col3:
-                if st.button("🔄 Run Combined Workflow", type="secondary", use_container_width=True):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    # Run Gmail workflow
-                    gmail_result = st.session_state.automation.process_gmail_workflow(
-                        gmail_config, progress_bar, status_text, None
-                    )
-                    
-                    if gmail_result['success']:
-                        progress_bar.progress(50)
-                        # Run Excel workflow
-                        excel_result = st.session_state.automation.process_excel_workflow(
-                            excel_config, progress_bar, status_text, None
-                        )
-                        
-                        progress_bar.progress(100)
-                        
-                        if excel_result['success']:
-                            st.success(f"✅ Combined workflow completed! Processed {gmail_result['processed']} attachments and {excel_result['processed']} files")
-                        else:
-                            st.error("❌ Combined workflow failed in Excel processing")
-                    else:
-                        st.error("❌ Combined workflow failed in Gmail processing")
+                success_count = len([log for log in st.session_state.logs if "SUCCESS" in log])
+                st.metric("Success", success_count)
             
-            # Instructions section
-            st.markdown("---")
-            with st.expander("📖 Instructions", expanded=False):
-                st.markdown("""
-                ### How to Use This App
+            with col4:
+                recent_logs = len([log for log in st.session_state.logs[-10:]])
+                st.metric("Recent (Last 10)", recent_logs)
                 
-                1. **Authentication**: Click the "Authenticate Google APIs" button in the sidebar
-                2. **Configuration**: Adjust search parameters as needed
-                3. **Execution**: Choose a workflow to run:
-                   - **Gmail to Drive**: Downloads Excel attachments from Gmail to Google Drive
-                   - **Drive to Sheets**: Processes Excel files from Drive and appends to Google Sheets
-                   - **Combined Workflow**: Runs both workflows sequentially
-                4. **Monitor Progress**: Check the "Activity Logs" tab for detailed progress information
-                
-                ### Workflow Details
-                
-                **Gmail to Drive Workflow:**
-                - Searches emails from bbnet2@bigbasket.com containing "grn"
-                - Downloads Excel attachments to a designated Google Drive folder
-                - Organizes files by sender email address
-                
-                **Drive to Sheets Workflow:**
-                - Processes Excel files from the source Drive folder
-                - Extracts data using robust parsing methods
-                - Appends data to the target Google Sheet
-                - Removes duplicates based on Item Code and po_number
-                
-                ### Troubleshooting
-                
-                - If authentication fails, try refreshing the page
-                - For file parsing issues, check the logs for specific errors
-                - Ensure the target Google Sheet has write permissions
-                """)
-        
-        with tab2:
-            st.markdown("### 📝 Activity Logs")
+        else:
+            st.info("No logs available. Run a workflow to see activity logs here.")
             
-            # Log controls
-            col1, col2, col3 = st.columns([1, 1, 2])
-            
-            with col1:
-                if st.button("🗑️ Clear Logs", use_container_width=True):
-                    st.session_state.logs = []
-                    st.rerun()
-            
-            with col2:
-                auto_refresh = st.checkbox("Auto Refresh", value=False)
-            
-            with col3:
-                log_level = st.selectbox(
-                    "Filter by Level",
-                    ["All", "ERROR", "SUCCESS", "INFO"],
-                    index=0
-                )
-            
-            # Display logs
-            st.markdown("---")
-            
-            if auto_refresh:
-                # Auto-refresh every 2 seconds when enabled
-                time.sleep(2)
-                st.rerun()
-            
-            # Filter logs based on selection
-            filtered_logs = st.session_state.logs
-            if log_level != "All":
-                filtered_logs = [log for log in st.session_state.logs if log_level in log]
-            
-            if filtered_logs:
-                # Display logs in a scrollable text area
-                logs_text = '\n'.join(filtered_logs)
-                st.text_area(
-                    "Detailed Activity Log",
-                    value=logs_text,
-                    height=500,
-                    key="main_log_display",
-                    help="All workflow activities are logged here with timestamps"
-                )
-                
-                # Show log statistics
-                st.markdown("#### 📈 Log Statistics")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    total_logs = len(st.session_state.logs)
-                    st.metric("Total Entries", total_logs)
-                
-                with col2:
-                    error_count = len([log for log in st.session_state.logs if "ERROR" in log])
-                    st.metric("Errors", error_count)
-                
-                with col3:
-                    success_count = len([log for log in st.session_state.logs if "SUCCESS" in log])
-                    st.metric("Success", success_count)
-                
-                with col4:
-                    recent_logs = len([log for log in st.session_state.logs[-10:]])
-                    st.metric("Recent (Last 10)", recent_logs)
-                    
-            else:
-                st.info("No logs available. Run a workflow to see activity logs here.")
-                
-        # Footer
-        st.markdown("---")
-        st.markdown("""
-        <div style='text-align: center; color: gray;'>
-            BigBasket Automation App | Built with Streamlit
-        </div>
-        """, unsafe_allow_html=True)
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: gray;'>
+        BigBasket Automation App | Built with Streamlit
+    </div>
+    """, unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     create_streamlit_ui()
-
-
-
-
-
-
-
