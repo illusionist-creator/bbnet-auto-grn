@@ -877,7 +877,7 @@ Gmail Drive Folder: 1l5L9IdQ8WcV6AZ04JCeuyxvbNkLPJnHt
             
             st.markdown("**Excel Configuration:**")
             st.code("""
-Excel Source Folder: 1mMg7tDkgQTQ3oxG9xJoa4gQ-DzT9R-pn
+Excel Source Folder: 1fdio9_h28UleeRjgRnWF32S8kg_fgWbs
 Target Spreadsheet: 170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM
 Sheet Name: bbalertgrn_2
 Duplicate Removal: Based on Item Code + po_number
@@ -893,7 +893,7 @@ Duplicate Removal: Based on Item Code + po_number
         }
         
         excel_config = {
-            'excel_folder_id': '1mMg7tDkgQTQ3oxG9xJoa4gQ-DzT9R-pn',
+            'excel_folder_id': '1fdio9_h28UleeRjgRnWF32S8kg_fgWbs',
             'spreadsheet_id': '170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM',
             'sheet_name': 'bbalertgrn_2',
             'header_row': header_row
@@ -1077,3 +1077,4 @@ Duplicate Removal: Based on Item Code + po_number
 
 if __name__ == "__main__":
     create_streamlit_ui()
+
