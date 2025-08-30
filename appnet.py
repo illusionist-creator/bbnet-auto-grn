@@ -268,7 +268,7 @@ class BigBasketAutomation:
             self._log_message("Starting Excel GRN workflow...", log_container)
             
             # Get Excel files from Drive folder
-            excel_files = self._get_excel_files(config['excel_folder_id'])
+            excel_files = self._get_excel_files(config['excel_folder_id'], config['max_results'])
             
             progress_bar.progress(25)
             self._log_message(f"Found {len(excel_files)} Excel files", log_container)
@@ -487,7 +487,7 @@ class BigBasketAutomation:
         
         return processed_count
     
-    def _get_excel_files(self, folder_id: str) -> List[Dict]:
+    def _get_excel_files(self, folder_id: str, max_results: int = 100) -> List[Dict]:
         """Get Excel files from Drive folder"""
         try:
             query = (f"'{folder_id}' in parents and "
@@ -497,7 +497,8 @@ class BigBasketAutomation:
             results = self.drive_service.files().list(
                 q=query,
                 fields="files(id, name)",
-                orderBy='createdTime desc'
+                orderBy='createdTime desc',
+                pageSize=max_results
             ).execute()
             
             files = results.get('files', [])
@@ -896,7 +897,8 @@ Duplicate Removal: Based on Item Code + po_number
             'excel_folder_id': '1fdio9_h28UleeRjgRnWF32S8kg_fgWbs',
             'spreadsheet_id': '170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM',
             'sheet_name': 'bbalertgrn_2',
-            'header_row': header_row
+            'header_row': header_row,
+            'max_results': max_results
         }
         
         # Workflow execution
@@ -1077,4 +1079,3 @@ Duplicate Removal: Based on Item Code + po_number
 
 if __name__ == "__main__":
     create_streamlit_ui()
-
