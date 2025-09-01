@@ -776,8 +776,8 @@ class BigBasketAutomation:
             df = pd.DataFrame(rows, columns=headers)
             before = len(df)
             
-            if "Item Code" in df.columns and "po_number" in df.columns:
-                df = df.drop_duplicates(subset=["Item Code", "po_number"], keep="first")
+            if "Skucode" in df.columns and "PoNo" in df.columns:
+                df = df.drop_duplicates(subset=["Skucode", "PoNo"], keep="first")
             
             after_dup = len(df)
             removed_dup = before - after_dup
@@ -1089,3 +1089,4 @@ Duplicate Check: Based on Item Code + po_number
 
 if __name__ == "__main__":
     create_streamlit_ui()
+
