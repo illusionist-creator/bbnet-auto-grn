@@ -18,6 +18,7 @@ import io
 import warnings
 import subprocess
 import sys
+import math
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from io import StringIO
@@ -56,7 +57,7 @@ class BigBasketAutomation:
         """Authenticate using Streamlit secrets with web-based OAuth flow"""
         try:
             status_text.text("Authenticating with Google APIs...")
-            progress_bar.progress(10)
+            progress_bar.progress(0.10)
             
             # Check for existing token in session state
             if 'oauth_token' in st.session_state:
@@ -64,12 +65,12 @@ class BigBasketAutomation:
                     combined_scopes = list(set(self.gmail_scopes + self.drive_scopes + self.sheets_scopes))
                     creds = Credentials.from_authorized_user_info(st.session_state.oauth_token, combined_scopes)
                     if creds and creds.valid:
-                        progress_bar.progress(50)
+                        progress_bar.progress(0.50)
                         # Build services
                         self.gmail_service = build('gmail', 'v1', credentials=creds)
                         self.drive_service = build('drive', 'v3', credentials=creds)
                         self.sheets_service = build('sheets', 'v4', credentials=creds)
-                        progress_bar.progress(100)
+                        progress_bar.progress(1.00)
                         status_text.text("Authentication successful!")
                         return True
                     elif creds and creds.expired and creds.refresh_token:
@@ -79,7 +80,7 @@ class BigBasketAutomation:
                         self.gmail_service = build('gmail', 'v1', credentials=creds)
                         self.drive_service = build('drive', 'v3', credentials=creds)
                         self.sheets_service = build('sheets', 'v4', credentials=creds)
-                        progress_bar.progress(100)
+                        progress_bar.progress(1.00)
                         status_text.text("Authentication successful!")
                         return True
                 except Exception as e:
@@ -111,13 +112,13 @@ class BigBasketAutomation:
                         # Save credentials in session state
                         st.session_state.oauth_token = json.loads(creds.to_json())
                         
-                        progress_bar.progress(50)
+                        progress_bar.progress(0.50)
                         # Build services
                         self.gmail_service = build('gmail', 'v1', credentials=creds)
                         self.drive_service = build('drive', 'v3', credentials=creds)
                         self.sheets_service = build('sheets', 'v4', credentials=creds)
                         
-                        progress_bar.progress(100)
+                        progress_bar.progress(1.00)
                         status_text.text("Authentication successful!")
                         
                         # Clear the code from URL
@@ -174,7 +175,7 @@ class BigBasketAutomation:
             st.error(f"Email search failed: {str(e)}")
             return []
     
-    def process_gmail_workflow(self, config: dict, progress_bar, status_text, log_container):
+    def process_gmail_workflow(self, config: dict, progress_bar, status_text, log_container, progress_base=0.0, progress_scale=1.0):
         """Process Gmail attachment download workflow"""
         try:
             status_text.text("Starting Gmail workflow...")
@@ -188,7 +189,7 @@ class BigBasketAutomation:
                 max_results=config['max_results']
             )
             
-            progress_bar.progress(25)
+            progress_bar.progress(progress_base + 0.25 * progress_scale)
             self._log_message(f"Gmail search completed. Found {len(emails)} emails", log_container)
             
             if not emails:
@@ -207,7 +208,7 @@ class BigBasketAutomation:
                 st.error(error_msg)
                 return {'success': False, 'processed': 0}
             
-            progress_bar.progress(50)
+            progress_bar.progress(progress_base + 0.50 * progress_scale)
             
             processed_count = 0
             total_attachments = 0
@@ -241,14 +242,14 @@ class BigBasketAutomation:
                         processed_count += 1
                         self._log_message(f"Found {attachment_count} attachments in: {subject}", log_container)
                     
-                    progress = 50 + (i + 1) / len(emails) * 45
-                    progress_bar.progress(int(progress))
+                    progress = 0.50 + (i + 1) / len(emails) * 0.45
+                    progress_bar.progress(progress_base + progress * progress_scale)
                     
                 except Exception as e:
                     error_msg = f"Failed to process email {email.get('id', 'unknown')}: {str(e)}"
                     self._log_message(f"ERROR: {error_msg}", log_container)
             
-            progress_bar.progress(100)
+            progress_bar.progress(progress_base + 1.00 * progress_scale)
             final_msg = f"Gmail workflow completed! Processed {total_attachments} attachments from {processed_count} emails"
             status_text.text(final_msg)
             self._log_message(f"SUCCESS: {final_msg}", log_container)
@@ -261,7 +262,7 @@ class BigBasketAutomation:
             st.error(error_msg)
             return {'success': False, 'processed': 0}
     
-    def process_excel_workflow(self, config: dict, progress_bar, status_text, log_container):
+    def process_excel_workflow(self, config: dict, progress_bar, status_text, log_container, progress_base=0.0, progress_scale=1.0):
         """Process Excel GRN workflow from Drive files"""
         try:
             status_text.text("Starting Excel GRN workflow...")
@@ -270,7 +271,7 @@ class BigBasketAutomation:
             # Get Excel files from Drive folder
             excel_files = self._get_excel_files(config['excel_folder_id'], config['max_results'])
             
-            progress_bar.progress(25)
+            progress_bar.progress(progress_base + 0.25 * progress_scale)
             self._log_message(f"Found {len(excel_files)} Excel files", log_container)
             
             if not excel_files:
@@ -280,11 +281,30 @@ class BigBasketAutomation:
             
             status_text.text(f"Found {len(excel_files)} Excel files. Processing...")
             
-            processed_count = 0
-            is_first_file = True
+            # Read existing sheet data
+            result = self.sheets_service.spreadsheets().values().get(
+                spreadsheetId=config['spreadsheet_id'],
+                range=f"{config['sheet_name']}!A:ZZ"
+            ).execute()
+            values = result.get('values', [])
             
-            # Check if sheet already has headers
-            sheet_has_headers = self._check_sheet_headers(config['spreadsheet_id'], config['sheet_name'])
+            if values:
+                headers = values[0]
+                rows = values[1:]
+                df_existing = pd.DataFrame(rows, columns=headers)
+                df_existing = self._clean_dataframe(df_existing)
+                if "Item Code" in df_existing.columns and "po_number" in df_existing.columns:
+                    existing_keys = set(zip(df_existing["Item Code"], df_existing["po_number"]))
+                else:
+                    existing_keys = set()
+                    self._log_message("Warning: 'Item Code' or 'po_number' columns not found in existing sheet", log_container)
+            else:
+                df_existing = pd.DataFrame()
+                existing_keys = set()
+            
+            sheet_has_headers = not df_existing.empty
+            is_first_append = True
+            processed_count = 0
             
             for i, file in enumerate(excel_files):
                 try:
@@ -298,41 +318,53 @@ class BigBasketAutomation:
                         self._log_message(f"SKIPPED - No data extracted from {file['name']}", log_container)
                         continue
                     
-                    self._log_message(f"Data shape: {df.shape} - Columns: {list(df.columns)[:3]}{'...' if len(df.columns) > 3 else ''}", log_container)
+                    df = self._clean_dataframe(df)
+                    
+                    if "Item Code" not in df.columns or "po_number" not in df.columns:
+                        self._log_message(f"SKIPPED - Missing key columns in {file['name']}", log_container)
+                        continue
+                    
+                    # Dedup within new data
+                    df = df.drop_duplicates(subset=["Item Code", "po_number"], keep="first")
+                    
+                    # Filter out existing duplicates
+                    new_keys = list(zip(df["Item Code"], df["po_number"]))
+                    mask = [key not in existing_keys for key in new_keys]
+                    df_unique = df.iloc[mask]
+                    
+                    if df_unique.empty:
+                        self._log_message(f"SKIPPED - No new unique data in {file['name']}", log_container)
+                        continue
+                    
+                    self._log_message(f"Data shape: {df_unique.shape} - Columns: {list(df_unique.columns)[:3]}{'...' if len(df_unique.columns) > 3 else ''}", log_container)
                     
                     # Append to Google Sheet
-                    append_headers = is_first_file and not sheet_has_headers
+                    append_headers = is_first_append and not sheet_has_headers
                     self._append_to_sheet(
                         config['spreadsheet_id'], 
                         config['sheet_name'], 
-                        df, 
+                        df_unique, 
                         append_headers,
                         log_container
                     )
                     
-                    self._log_message(f"APPENDED to Google Sheet successfully: {file['name']}", log_container)
+                    # Update existing keys
+                    added_keys = set(zip(df_unique["Item Code"], df_unique["po_number"]))
+                    existing_keys.update(added_keys)
+                    
+                    self._log_message(f"APPENDED {len(df_unique)} unique rows from {file['name']}", log_container)
                     processed_count += 1
-                    is_first_file = False
+                    is_first_append = False
                     sheet_has_headers = True
                     
-                    progress = 25 + (i + 1) / len(excel_files) * 70
-                    progress_bar.progress(int(progress))
+                    progress = 0.25 + (i + 1) / len(excel_files) * 0.75
+                    progress_bar.progress(progress_base + progress * progress_scale)
                     
                 except Exception as e:
                     error_msg = f"Failed to process Excel file {file.get('name', 'unknown')}: {str(e)}"
                     self._log_message(f"ERROR: {error_msg}", log_container)
             
-            # Remove duplicates
-            if processed_count > 0:
-                status_text.text("Removing duplicates from Google Sheet...")
-                self._log_message("Removing duplicates from Google Sheet...", log_container)
-                self._remove_duplicates_from_sheet(
-                    config['spreadsheet_id'], 
-                    config['sheet_name'],
-                    log_container
-                )
-            
-            progress_bar.progress(100)
+            progress_bar.progress(progress_base + 1.00 * progress_scale)
             final_msg = f"Excel workflow completed! Processed {processed_count} files"
             status_text.text(final_msg)
             self._log_message(f"SUCCESS: {final_msg}", log_container)
@@ -354,7 +386,7 @@ class BigBasketAutomation:
         log_entry = f"[{timestamp}] {message}"
         st.session_state.logs.append(log_entry)
         
-        # Keep only last 1000 log entries (increased from 100)
+        # Keep only last 1000 log entries
         if len(st.session_state.logs) > 1000:
             st.session_state.logs = st.session_state.logs[-1000:]
     
@@ -648,15 +680,17 @@ class BigBasketAutomation:
             return pd.DataFrame()
     
     def _clean_cell_value(self, value):
-        """Clean and standardize cell values"""
+        """Clean and standardize cell values, preserving numbers"""
         if value is None:
-            return ""
-        if isinstance(value, (int, float)):
-            if pd.isna(value):
-                return ""
-            return str(value)
-        cleaned = str(value).strip().replace("'", "")
-        return cleaned
+            return None
+        value = str(value).strip().replace("'", "")
+        try:
+            if '.' in value or 'e' in value.lower():
+                return float(value)
+            else:
+                return int(value)
+        except ValueError:
+            return value
     
     def _clean_dataframe(self, df):
         """Clean DataFrame by removing blank rows and duplicates"""
@@ -685,27 +719,23 @@ class BigBasketAutomation:
         
         return df
     
-    def _check_sheet_headers(self, spreadsheet_id: str, sheet_name: str) -> bool:
-        """Check if Google Sheet already has headers"""
-        try:
-            result = self.sheets_service.spreadsheets().values().get(
-                spreadsheetId=spreadsheet_id,
-                range=f"{sheet_name}!A1"
-            ).execute()
-            return bool(result.get('values', []))
-        except:
-            return False
-    
     def _append_to_sheet(self, spreadsheet_id: str, sheet_name: str, df: pd.DataFrame, append_headers: bool, log_container):
-        """Append DataFrame to Google Sheet"""
+        """Append DataFrame to Google Sheet, preserving number types"""
         try:
-            # Prepare data
-            clean_data = df.fillna('').astype(str)
+            # Prepare values with proper types
+            def process_value(v):
+                if math.isnan(v) if isinstance(v, float) else pd.isna(v):
+                    return ''
+                if isinstance(v, (int, float)):
+                    return v
+                return str(v) if v is not None else ''
             
+            values = []
             if append_headers:
-                values = [clean_data.columns.tolist()] + clean_data.values.tolist()
-            else:
-                values = clean_data.values.tolist()
+                values.append([str(col) for col in df.columns])
+            
+            data_rows = [[process_value(cell) for cell in row] for row in df.itertuples(index=False)]
+            values += data_rows
             
             if not values:
                 return
@@ -731,50 +761,6 @@ class BigBasketAutomation:
         except Exception as e:
             self._log_message(f"ERROR appending to sheet: {str(e)}", log_container)
             raise
-    
-    def _remove_duplicates_from_sheet(self, spreadsheet_id: str, sheet_name: str, log_container):
-        """Remove duplicates based on Item Code and po_number"""
-        try:
-            result = self.sheets_service.spreadsheets().values().get(
-                spreadsheetId=spreadsheet_id,
-                range=f"{sheet_name}!A1:ZZ"
-            ).execute()
-            values = result.get('values', [])
-            
-            if not values:
-                self._log_message("Sheet is empty, skipping duplicate removal", log_container)
-                return
-            
-            headers = values[0]
-            rows = values[1:]
-            df = pd.DataFrame(rows, columns=headers)
-            before = len(df)
-            
-            if "Item Code" in df.columns and "po_number" in df.columns:
-                df = df.drop_duplicates(subset=["Item Code", "po_number"], keep="first")
-                after = len(df)
-                removed = before - after
-                
-                # Update sheet with deduplicated data
-                self.sheets_service.spreadsheets().values().clear(
-                    spreadsheetId=spreadsheet_id,
-                    range=sheet_name
-                ).execute()
-                
-                body = {"values": [headers] + df.values.tolist()}
-                self.sheets_service.spreadsheets().values().update(
-                    spreadsheetId=spreadsheet_id,
-                    range=f"{sheet_name}!A1",
-                    valueInputOption="RAW",
-                    body=body
-                ).execute()
-                
-                self._log_message(f"Removed {removed} duplicate rows. Final count: {after}", log_container)
-            else:
-                self._log_message("Warning: 'Item Code' or 'po_number' columns not found, skipping duplicate removal", log_container)
-                
-        except Exception as e:
-            self._log_message(f"ERROR removing duplicates: {str(e)}", log_container)
 
 
 def create_streamlit_ui():
@@ -790,16 +776,8 @@ def create_streamlit_ui():
     if 'logs' not in st.session_state:
         st.session_state.logs = []
     
-    # Initialize log counter for unique keys
-    if 'log_counter' not in st.session_state:
-        st.session_state.log_counter = 0
-    
-    # Sidebar for navigation and authentication
+    # Sidebar for authentication and configuration
     st.sidebar.title("Navigation")
-    workflow_choice = st.sidebar.selectbox(
-        "Select Workflow",
-        ["Gmail to Drive", "Drive to Sheets", "Combined Workflow"]
-    )
     
     # Authentication section
     st.sidebar.markdown("---")
@@ -807,11 +785,8 @@ def create_streamlit_ui():
     
     if st.sidebar.button("Authenticate Google APIs", key="auth_button"):
         with st.spinner("Authenticating..."):
-            progress_bar = st.progress(0)
+            progress_bar = st.progress(0.0)
             status_text = st.empty()
-            
-            # Create a placeholder for logs during authentication
-            log_placeholder = st.empty()
             
             success = st.session_state.automation.authenticate_from_secrets(
                 progress_bar, status_text
@@ -831,175 +806,125 @@ def create_streamlit_ui():
     
     st.sidebar.success("✅ Authenticated")
     
-    # Create tabs
-    tab1, tab2 = st.tabs(["📊 Configuration & Execution", "📋 Activity Logs"])
+    # Configuration in sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⚙️ Configuration")
     
-    with tab1:
-        # Configuration section
-        st.markdown("### ⚙️ Configuration")
-        
-        # User configurable parameters
-        config_col1, config_col2 = st.columns(2)
-        
-        with config_col1:
-            days_back = st.number_input(
-                "Days Back to Search",
-                min_value=1,
-                max_value=365,
-                value=2,
-                help="How many days back to search emails"
-            )
-        
-        with config_col2:
-            max_results = st.number_input(
-                "Maximum Results",
-                min_value=1,
-                max_value=1000,
-                value=1000,
-                help="Maximum number of emails to process"
-            )
-        
-        # Header row configuration
-        header_row = st.selectbox(
-            "Header Row Position",
-            options=[0, 1, 2, -1],
-            format_func=lambda x: "First row (0)" if x == 0 else "Second row (1)" if x == 1 else "Third row (2)" if x == 2 else "No headers (-1)",
-            help="Row number where headers are located (-1 means no headers)"
-        )
-        
-        # Show hardcoded configurations
-        with st.expander("📋 Hardcoded Configuration (View Only)", expanded=False):
-            st.markdown("**Gmail Configuration:**")
-            st.code("""
+    days_back = st.sidebar.number_input(
+        "Days Back to Search",
+        min_value=1,
+        max_value=365,
+        value=2,
+        help="How many days back to search emails"
+    )
+    
+    max_results = st.sidebar.number_input(
+        "Maximum Results",
+        min_value=1,
+        max_value=1000,
+        value=1000,
+        help="Maximum number of emails/files to process"
+    )
+    
+    header_row = st.sidebar.selectbox(
+        "Header Row Position",
+        options=[0, 1, 2, -1],
+        format_func=lambda x: "First row (0)" if x == 0 else "Second row (1)" if x == 1 else "Third row (2)" if x == 2 else "No headers (-1)",
+        help="Row number where headers are located (-1 means no headers)"
+    )
+    
+    # Show hardcoded configurations
+    with st.sidebar.expander("📋 Hardcoded Configuration", expanded=False):
+        st.markdown("**Gmail Configuration:**")
+        st.code("""
 Sender: bbnet2@bigbasket.com
 Search Term: grn
 Gmail Drive Folder: 1l5L9IdQ8WcV6AZ04JCeuyxvbNkLPJnHt
-            """)
-            
-            st.markdown("**Excel Configuration:**")
-            st.code("""
+        """)
+        
+        st.markdown("**Excel Configuration:**")
+        st.code("""
 Excel Source Folder: 1fdio9_h28UleeRjgRnWF32S8kg_fgWbs
 Target Spreadsheet: 170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM
 Sheet Name: bbalertgrn_2
-Duplicate Removal: Based on Item Code + po_number
-            """)
-        
-        # Hardcoded configurations
-        gmail_config = {
-            'sender': 'bbnet2@bigbasket.com',
-            'search_term': 'grn',
-            'days_back': days_back,
-            'max_results': max_results,
-            'gdrive_folder_id': '1l5L9IdQ8WcV6AZ04JCeuyxvbNkLPJnHt'
-        }
-        
-        excel_config = {
-            'excel_folder_id': '1fdio9_h28UleeRjgRnWF32S8kg_fgWbs',
-            'spreadsheet_id': '170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM',
-            'sheet_name': 'bbalertgrn_2',
-            'header_row': header_row,
-            'max_results': max_results
-        }
-        
-        # Workflow execution
-        st.markdown("---")
-        st.markdown("### 🚀 Execute Workflow")
-        
-        # Create a placeholder for the log container that will be used in tab2
-        if 'log_container' not in st.session_state:
-            st.session_state.log_container = None
-        
-        col1, col2, col3 = st.columns([1, 1, 2])
-        
-        with col1:
-            if st.button("📧 Run Gmail to Drive", type="primary", use_container_width=True):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                result = st.session_state.automation.process_gmail_workflow(
-                    gmail_config, progress_bar, status_text, None  # Pass None for log_container
-                )
-                
-                if result['success']:
-                    st.success(f"✅ Gmail workflow completed! Processed {result['processed']} attachments")
-                else:
-                    st.error("❌ Gmail workflow failed")
-        
-        with col2:
-            if st.button("📊 Run Drive to Sheets", type="primary", use_container_width=True):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                result = st.session_state.automation.process_excel_workflow(
-                    excel_config, progress_bar, status_text, None  # Pass None for log_container
-                )
-                
-                if result['success']:
-                    st.success(f"✅ Excel workflow completed! Processed {result['processed']} files")
-                else:
-                    st.error("❌ Excel workflow failed")
-        
-        with col3:
-            if st.button("🔄 Run Combined Workflow", type="secondary", use_container_width=True):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                # Run Gmail workflow
-                gmail_result = st.session_state.automation.process_gmail_workflow(
-                    gmail_config, progress_bar, status_text, None
-                )
-                
-                if gmail_result['success']:
-                    progress_bar.progress(50)
-                    # Run Excel workflow
-                    excel_result = st.session_state.automation.process_excel_workflow(
-                        excel_config, progress_bar, status_text, None
-                    )
-                    
-                    progress_bar.progress(100)
-                    
-                    if excel_result['success']:
-                        st.success(f"✅ Combined workflow completed! Processed {gmail_result['processed']} attachments and {excel_result['processed']} files")
-                    else:
-                        st.error("❌ Combined workflow failed in Excel processing")
-                else:
-                    st.error("❌ Combined workflow failed in Gmail processing")
-        
-        # Instructions section
-        st.markdown("---")
-        with st.expander("📖 Instructions", expanded=False):
-            st.markdown("""
-            ### How to Use This App
-            
-            1. **Authentication**: Click the "Authenticate Google APIs" button in the sidebar
-            2. **Configuration**: Adjust search parameters as needed
-            3. **Execution**: Choose a workflow to run:
-               - **Gmail to Drive**: Downloads Excel attachments from Gmail to Google Drive
-               - **Drive to Sheets**: Processes Excel files from Drive and appends to Google Sheets
-               - **Combined Workflow**: Runs both workflows sequentially
-            4. **Monitor Progress**: Check the "Activity Logs" tab for detailed progress information
-            
-            ### Workflow Details
-            
-            **Gmail to Drive Workflow:**
-            - Searches emails from bbnet2@bigbasket.com containing "grn"
-            - Downloads Excel attachments to a designated Google Drive folder
-            - Organizes files by sender email address
-            
-            **Drive to Sheets Workflow:**
-            - Processes Excel files from the source Drive folder
-            - Extracts data using robust parsing methods
-            - Appends data to the target Google Sheet
-            - Removes duplicates based on Item Code and po_number
-            
-            ### Troubleshooting
-            
-            - If authentication fails, try refreshing the page
-            - For file parsing issues, check the logs for specific errors
-            - Ensure the target Google Sheet has write permissions
-            """)
+Duplicate Check: Based on Item Code + po_number
+        """)
     
-    with tab2:
+    # Hardcoded configurations
+    gmail_config = {
+        'sender': 'bbnet2@bigbasket.com',
+        'search_term': 'grn',
+        'days_back': days_back,
+        'max_results': max_results,
+        'gdrive_folder_id': '1l5L9IdQ8WcV6AZ04JCeuyxvbNkLPJnHt'
+    }
+    
+    excel_config = {
+        'excel_folder_id': '1fdio9_h28UleeRjgRnWF32S8kg_fgWbs',
+        'spreadsheet_id': '170WUaPhkuxCezywEqZXJtHRw3my3rpjB9lJOvfLTeKM',
+        'sheet_name': 'bbalertgrn_2',
+        'header_row': header_row,
+        'max_results': max_results
+    }
+    
+    # Create tabs for workflows and logs
+    tab_gmail, tab_excel, tab_combined, tab_logs = st.tabs(["📧 Gmail to Drive", "📊 Drive to Sheets", "🔄 Combined Workflow", "📋 Activity Logs"])
+    
+    with tab_gmail:
+        st.markdown("### 🚀 Execute Gmail to Drive Workflow")
+        if st.button("Run Gmail to Drive", type="primary"):
+            progress_bar = st.progress(0.0)
+            status_text = st.empty()
+            
+            result = st.session_state.automation.process_gmail_workflow(
+                gmail_config, progress_bar, status_text, None
+            )
+            
+            if result['success']:
+                st.success(f"✅ Gmail workflow completed! Processed {result['processed']} attachments")
+            else:
+                st.error("❌ Gmail workflow failed")
+    
+    with tab_excel:
+        st.markdown("### 🚀 Execute Drive to Sheets Workflow")
+        if st.button("Run Drive to Sheets", type="primary"):
+            progress_bar = st.progress(0.0)
+            status_text = st.empty()
+            
+            result = st.session_state.automation.process_excel_workflow(
+                excel_config, progress_bar, status_text, None
+            )
+            
+            if result['success']:
+                st.success(f"✅ Excel workflow completed! Processed {result['processed']} files")
+            else:
+                st.error("❌ Excel workflow failed")
+    
+    with tab_combined:
+        st.markdown("### 🚀 Execute Combined Workflow")
+        if st.button("Run Combined Workflow", type="primary"):
+            progress_bar = st.progress(0.0)
+            status_text = st.empty()
+            
+            # Run Gmail workflow (first half of progress)
+            gmail_result = st.session_state.automation.process_gmail_workflow(
+                gmail_config, progress_bar, status_text, None, progress_base=0.0, progress_scale=0.5
+            )
+            
+            if gmail_result['success']:
+                # Run Excel workflow (second half of progress)
+                excel_result = st.session_state.automation.process_excel_workflow(
+                    excel_config, progress_bar, status_text, None, progress_base=0.5, progress_scale=0.5
+                )
+                
+                if excel_result['success']:
+                    st.success(f"✅ Combined workflow completed! Processed {gmail_result['processed']} attachments and {excel_result['processed']} files")
+                else:
+                    st.error("❌ Combined workflow failed in Excel processing")
+            else:
+                st.error("❌ Combined workflow failed in Gmail processing")
+    
+    with tab_logs:
         st.markdown("### 📋 Activity Logs")
         
         # Log controls
@@ -1062,12 +987,45 @@ Duplicate Removal: Based on Item Code + po_number
                 st.metric("Success", success_count)
             
             with col4:
-                recent_logs = len([log for log in st.session_state.logs[-10:]])
+                recent_logs = len(st.session_state.logs[-10:])
                 st.metric("Recent (Last 10)", recent_logs)
                 
         else:
             st.info("No logs available. Run a workflow to see activity logs here.")
-            
+    
+    # Instructions in sidebar
+    with st.sidebar.expander("📖 Instructions", expanded=False):
+        st.markdown("""
+        ### How to Use This App
+        
+        1. **Authentication**: Click the "Authenticate Google APIs" button
+        2. **Configuration**: Adjust parameters as needed
+        3. **Execution**: Go to the desired tab and click the run button
+           - **Gmail to Drive**: Downloads Excel attachments from Gmail to Google Drive
+           - **Drive to Sheets**: Processes Excel files from Drive and appends unique data to Google Sheets
+           - **Combined Workflow**: Runs both sequentially
+        4. **Monitor**: Check the "Activity Logs" tab for details
+        
+        ### Workflow Details
+        
+        **Gmail to Drive:**
+        - Searches emails from bbnet2@bigbasket.com containing "grn"
+        - Downloads Excel attachments to Drive
+        - Organizes by sender
+        
+        **Drive to Sheets:**
+        - Processes Excel files from source folder
+        - Extracts data robustly
+        - Appends only unique rows (based on Item Code + po_number)
+        - Preserves number types
+        
+        ### Troubleshooting
+        
+        - Refresh page if authentication fails
+        - Check logs for parsing issues
+        - Ensure Sheet permissions
+        """)
+    
     # Footer
     st.markdown("---")
     st.markdown("""
